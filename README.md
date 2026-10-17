@@ -16,10 +16,7 @@ ways:
 
 **Most cameras with two-way audio** - Reolink, Dahua, Amcrest and many
 others - through the standard ONVIF *back channel*, on the camera's own
-RTSP stream. You give it the RTSP address you would use for the video
-(for example `rtsp://192.168.1.20:554/h264Preview_01_main`) and the
-camera's login. Setup asks the camera whether it has a back channel
-before saving anything.
+RTSP stream.
 
 **Tapo (TP-Link)** cameras, which have no back channel and use their own
 channel on port 8800 instead - the same one go2rtc uses. Tapo needs:
@@ -44,8 +41,23 @@ Through HACS, as a custom repository:
 1. HACS > the three-dot menu > **Custom repositories**.
 2. Add this repository's URL, type **Integration**.
 3. Install **Camera Noise**, then restart Home Assistant.
-4. **Settings > Devices & services > Add integration > Camera Noise**,
-   choose the kind of camera, and fill in its details.
+4. **Settings > Devices & services > Add integration > Camera Noise**.
+
+Everything is set up in the UI; there is no YAML. Setup asks for a name and
+the camera's address, then works out what kind of camera it is and asks
+only for what that needs:
+
+- **A Tapo** (it answers on port 8800 - asked without a password): your
+  TP-Link account password.
+- **Anything else**: the camera's own username and password. Given just an
+  IP, it asks the camera over ONVIF for its stream addresses and uses the
+  first that has a back channel, so you never need the RTSP path. If the
+  camera cannot say, setup asks you for it. You can also type an
+  `rtsp://` address in the first place.
+
+The camera is asked before anything is saved, and nothing makes a sound
+while you set it up. **Reconfigure**, in the camera's menu, changes its
+address or login later - leave a password blank to keep the saved one.
 
 Or copy `custom_components/camera_noise` into your Home Assistant
 `config/custom_components` folder and restart.
@@ -68,6 +80,8 @@ stopped. A refused password is not retried: Tapo locks out repeated failed
 logins.
 
 ### A bedtime automation
+
+Built in the automation editor like any other; in YAML, it is:
 
 ```yaml
 automation:
