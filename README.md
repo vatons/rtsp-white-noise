@@ -11,18 +11,31 @@ loses nothing at that quality.
 
 ## Cameras
 
-**Tapo (TP-Link)** cameras with a speaker, such as the C120. Tapo has no
-standard talk-back channel; this uses the camera's own on port 8800, the
-same one go2rtc uses.
+Nearly any camera with a speaker that can be reached on your network, two
+ways:
 
-Tapo needs two things:
+**Most cameras with two-way audio** - Reolink, Dahua, Amcrest and many
+others - through the standard ONVIF *back channel*, on the camera's own
+RTSP stream. You give it the RTSP address you would use for the video
+(for example `rtsp://192.168.1.20:554/h264Preview_01_main`) and the
+camera's login. Setup asks the camera whether it has a back channel
+before saving anything.
+
+**Tapo (TP-Link)** cameras, which have no back channel and use their own
+channel on port 8800 instead - the same one go2rtc uses. Tapo needs:
 
 - Your **TP-Link account password**. It is hashed and checked by the
   camera on your network; nothing is sent to TP-Link.
 - **Third-Party Compatibility** switched on in the Tapo app, under
   **Me > Tapo Lab**. Without it the camera refuses even the right password.
 
-Standard ONVIF cameras with a back channel are not supported yet.
+A Tapo takes about five seconds to accept its login - that is the camera,
+not the network - so its noise starts a few seconds after you press play.
+
+What will not work: cameras that only talk to their maker's cloud (Ring,
+Nest and the like), and cameras whose speaker is only reachable through a
+proprietary API rather than the back channel - some Hikvision models, for
+one. Setup says so when a camera has no back channel to offer.
 
 ## Install
 
@@ -32,7 +45,7 @@ Through HACS, as a custom repository:
 2. Add this repository's URL, type **Integration**.
 3. Install **Camera Noise**, then restart Home Assistant.
 4. **Settings > Devices & services > Add integration > Camera Noise**,
-   and enter the camera's name, IP address and TP-Link account password.
+   choose the kind of camera, and fill in its details.
 
 Or copy `custom_components/camera_noise` into your Home Assistant
 `config/custom_components` folder and restart.
@@ -91,11 +104,14 @@ computer:
 
 ```
 cp camera.local.example.json camera.local.json   # then fill it in
-python tools/play.py --check                      # logs in, plays nothing
+python tools/play.py --check                      # asks the camera, plays nothing
 python tools/play.py --sound pink --volume 0.2 --seconds 15
+python tools/play.py --config camera.door.local.json --check
 ```
 
-`camera.local.json` is git-ignored.
+A Tapo's file has `host` and `tapo_cloud_password`; any other camera's has
+`stream_url`, `username` and `password`. Files named `camera*.local.json`
+are git-ignored.
 
 Tests: `python -m pytest` runs the protocol and session tests anywhere.
 The integration tests need Home Assistant, which does not install on
@@ -109,4 +125,5 @@ EOF
 docker run --rm -v "$PWD:/app" -w /app camera-noise-test python -m pytest
 ```
 
-The MPEG-TS tests check against bytes a real Tapo C120 accepted.
+The MPEG-TS tests check against bytes a real Tapo C120 accepted, and the
+ONVIF tests run a whole session against a fake camera on localhost.

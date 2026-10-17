@@ -2,8 +2,29 @@
   "config": {
     "step": {
       "user": {
+        "title": "Add a camera",
+        "description": "Plays white, pink or ocean noise through a camera's own speaker. Which kind of camera is it?",
+        "menu_options": {
+          "onvif": "A camera with two-way audio (most makes)",
+          "tapo": "A TP-Link Tapo camera"
+        }
+      },
+      "onvif": {
+        "title": "Add a camera",
+        "description": "Works with cameras that support the standard (ONVIF) way of sending audio to their speaker - most with two-way audio do. Enter the RTSP stream address you would use for the camera's video, and its login.",
+        "data": {
+          "name": "Name",
+          "stream_url": "RTSP stream address",
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "stream_url": "For example rtsp://192.168.1.20:554/stream1. A login written into the address is used too."
+        }
+      },
+      "tapo": {
         "title": "Add a Tapo camera",
-        "description": "Plays white, pink or ocean noise through the camera's own speaker. Tapo cameras need your TP-Link account password, which is checked with the camera on your network and never sent anywhere else. Third-Party Compatibility must be on in the Tapo app, under Me > Tapo Lab.",
+        "description": "Tapo cameras need your TP-Link account password, which is checked with the camera on your network and never sent anywhere else. Third-Party Compatibility must be on in the Tapo app, under Me > Tapo Lab.",
         "data": {
           "name": "Name",
           "host": "Camera IP address",
@@ -12,10 +33,13 @@
       }
     },
     "error": {
-      "cannot_connect": "Couldn't reach the camera. Check the IP address and that it's on this network.",
+      "cannot_connect": "Couldn't reach the camera. Check the address and that it's on this network.",
+      "invalid_url": "That isn't an RTSP address. It should start rtsp://",
+      "invalid_auth": "The camera refused the username or password.",
+      "no_backchannel": "The camera didn't offer a speaker this can use. Not every camera with a speaker supports the standard way of sending it audio.",
+      "is_tapo": "That's a Tapo camera. Go back and choose Tapo, which uses your TP-Link account password instead.",
       "not_tapo": "That address doesn't answer like a Tapo camera.",
       "third_party": "The camera refused the password. Check it, and that Third-Party Compatibility is on in the Tapo app (Me > Tapo Lab).",
-      "invalid_auth": "The camera refused the password.",
       "unknown": "Something unexpected went wrong. The log has the detail."
     },
     "abort": {

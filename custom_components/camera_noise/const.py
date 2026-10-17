@@ -7,6 +7,7 @@ from .talk.noise import OCEAN, PINK, WHITE
 DOMAIN = "camera_noise"
 
 CONF_KIND = "kind"
+CONF_STREAM_URL = "stream_url"
 CONF_TAPO_CLOUD_PASSWORD = "tapo_cloud_password"
 
 # The sound names as Home Assistant shows them, in the order offered.

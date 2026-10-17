@@ -26,8 +26,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from . import CameraNoiseConfigEntry
-from .const import DOMAIN, SOUND_LABELS
+from .const import CONF_KIND, DOMAIN, SOUND_LABELS
 from .talk.session import State
+from .talk.transports import KIND_TAPO
 
 _SOUND_BY_LABEL = {label: sound for sound, label in SOUND_LABELS.items()}
 
@@ -39,11 +40,12 @@ async def async_setup_entry(
 
 
 def device_info(entry: CameraNoiseConfigEntry) -> DeviceInfo:
+    tapo = entry.data.get(CONF_KIND) == KIND_TAPO
     return DeviceInfo(
         identifiers={(DOMAIN, entry.entry_id)},
         name=entry.title,
-        manufacturer="TP-Link",
-        model="Tapo camera speaker",
+        manufacturer="TP-Link" if tapo else None,
+        model="Tapo camera speaker" if tapo else "Camera speaker (ONVIF)",
     )
 
 

@@ -1,7 +1,7 @@
 """The integration inside Home Assistant: adding a camera, and the entities.
 
-The camera is faked throughout - the login checks and the transport - so
-these make no sound and need no network.
+The camera is faked throughout - the checks and the transport - so these
+make no sound and need no network.
 """
 
 from __future__ import annotations
@@ -10,18 +10,24 @@ from unittest.mock import patch
 
 import pytest
 from homeassistant import config_entries
-from homeassistant.const import CONF_HOST, CONF_NAME
+from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.camera_noise.const import CONF_KIND, CONF_TAPO_CLOUD_PASSWORD, DOMAIN
+from custom_components.camera_noise.const import CONF_KIND, CONF_STREAM_URL, CONF_TAPO_CLOUD_PASSWORD, DOMAIN
 from custom_components.camera_noise.talk.errors import Failure, TalkbackError
 
 PLAYER = "media_player.nursery"
 SWITCH = "switch.nursery_noise"
 
-USER_INPUT = {CONF_NAME: "Nursery", CONF_HOST: "192.0.2.10", CONF_TAPO_CLOUD_PASSWORD: "secret"}
+TAPO_INPUT = {CONF_NAME: "Nursery", CONF_HOST: "192.0.2.10", CONF_TAPO_CLOUD_PASSWORD: "secret"}
+ONVIF_INPUT = {
+    CONF_NAME: "Front door",
+    CONF_STREAM_URL: "rtsp://admin:pw@192.0.2.20:554/h264Preview_01_main",
+    CONF_USERNAME: "",
+}
+FLOW = "custom_components.camera_noise.config_flow"
 
 
 @pytest.fixture(autouse=True)
@@ -57,6 +63,15 @@ def fake_camera():
         yield FakeTransport.made
 
 
+async def _form(hass: HomeAssistant, kind: str):
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    assert result["type"] is FlowResultType.MENU
+    assert result["menu_options"] == ["onvif", "tapo"]
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": kind})
+    assert result["type"] is FlowResultType.FORM
+    return result
+
+
 async def _set_up(hass: HomeAssistant) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -70,48 +85,104 @@ async def _set_up(hass: HomeAssistant) -> MockConfigEntry:
     return entry
 
 
-async def test_adding_a_camera_checks_the_password_first(hass: HomeAssistant) -> None:
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    assert result["type"] is FlowResultType.FORM
+# --- Adding an ONVIF camera --------------------------------------------------
 
+async def test_adding_any_camera_checks_for_a_back_channel(hass: HomeAssistant) -> None:
+    result = await _form(hass, "onvif")
     with (
-        patch("custom_components.camera_noise.config_flow.tapo.looks_like_tapo", return_value=True),
-        patch("custom_components.camera_noise.config_flow.tapo.check_cloud_password", return_value=None) as check,
+        patch(f"{FLOW}.onvif.probe", return_value=None) as probe,
         patch("custom_components.camera_noise.async_setup_entry", return_value=True),
     ):
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], ONVIF_INPUT)
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Nursery"
+    assert result["title"] == "Front door"
+    # The login written into the address is used, and stored apart from it.
+    assert result["data"] == {
+        CONF_KIND: "onvif",
+        CONF_STREAM_URL: "rtsp://192.0.2.20:554/h264Preview_01_main",
+        CONF_USERNAME: "admin",
+        CONF_PASSWORD: "pw",
+    }
+    probe.assert_called_once_with("rtsp://192.0.2.20:554/h264Preview_01_main", "admin", "pw")
+
+
+async def test_a_tapo_entered_as_any_camera_is_sent_to_the_tapo_form(hass: HomeAssistant) -> None:
+    result = await _form(hass, "onvif")
+    with (
+        patch(f"{FLOW}.onvif.probe", return_value=TalkbackError(Failure.UNSUPPORTED, "no back channel")),
+        patch(f"{FLOW}.tapo.looks_like_tapo", return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], ONVIF_INPUT)
+    assert result["errors"] == {"base": "is_tapo"}
+
+
+async def test_a_camera_with_no_back_channel_says_so(hass: HomeAssistant) -> None:
+    result = await _form(hass, "onvif")
+    with (
+        patch(f"{FLOW}.onvif.probe", return_value=TalkbackError(Failure.UNSUPPORTED, "no back channel")),
+        patch(f"{FLOW}.tapo.looks_like_tapo", return_value=False),
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], ONVIF_INPUT)
+    assert result["errors"] == {"base": "no_backchannel"}
+
+
+async def test_a_refused_camera_login_says_so(hass: HomeAssistant) -> None:
+    result = await _form(hass, "onvif")
+    with patch(f"{FLOW}.onvif.probe", return_value=TalkbackError(Failure.REJECTED, "401")):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], ONVIF_INPUT)
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_something_that_is_not_rtsp_is_refused(hass: HomeAssistant) -> None:
+    result = await _form(hass, "onvif")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**ONVIF_INPUT, CONF_STREAM_URL: "http://192.0.2.20/"}
+    )
+    assert result["errors"] == {CONF_STREAM_URL: "invalid_url"}
+
+
+# --- Adding a Tapo -----------------------------------------------------------
+
+async def test_adding_a_tapo_checks_the_password_first(hass: HomeAssistant) -> None:
+    result = await _form(hass, "tapo")
+    with (
+        patch(f"{FLOW}.tapo.looks_like_tapo", return_value=True),
+        patch(f"{FLOW}.tapo.check_cloud_password", return_value=None) as check,
+        patch("custom_components.camera_noise.async_setup_entry", return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], TAPO_INPUT)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == {CONF_KIND: "tapo", CONF_HOST: "192.0.2.10", CONF_TAPO_CLOUD_PASSWORD: "secret"}
     check.assert_called_once_with("192.0.2.10", "secret")
 
 
-async def test_a_refused_password_names_the_tapo_setting(hass: HomeAssistant) -> None:
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+async def test_a_refused_tapo_password_names_the_tapo_setting(hass: HomeAssistant) -> None:
+    result = await _form(hass, "tapo")
     with (
-        patch("custom_components.camera_noise.config_flow.tapo.looks_like_tapo", return_value=True),
+        patch(f"{FLOW}.tapo.looks_like_tapo", return_value=True),
         patch(
-            "custom_components.camera_noise.config_flow.tapo.check_cloud_password",
+            f"{FLOW}.tapo.check_cloud_password",
             return_value=TalkbackError(Failure.NEEDS_THIRD_PARTY_ACCESS, "HTTP 401"),
         ),
     ):
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
-    assert result["type"] is FlowResultType.FORM
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], TAPO_INPUT)
     assert result["errors"] == {"base": "third_party"}
 
 
 async def test_something_that_is_not_a_tapo_is_turned_away(hass: HomeAssistant) -> None:
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    with patch("custom_components.camera_noise.config_flow.tapo.looks_like_tapo", return_value=False):
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
+    result = await _form(hass, "tapo")
+    with patch(f"{FLOW}.tapo.looks_like_tapo", return_value=False):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], TAPO_INPUT)
     assert result["errors"] == {"base": "not_tapo"}
 
 
+# --- The entities ------------------------------------------------------------
+
 async def test_play_volume_sound_and_stop(hass: HomeAssistant, fake_camera) -> None:
     await _set_up(hass)
-    state = hass.states.get(PLAYER)
-    assert state.state == "idle"
+    assert hass.states.get(PLAYER).state == "idle"
     assert hass.states.get(SWITCH).state == "off"
 
     await hass.services.async_call(

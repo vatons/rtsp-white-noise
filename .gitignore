@@ -1,5 +1,6 @@
 # Real camera details and passwords, for tools/play.py. Never committed.
 camera.local.json
+camera*.local.json
 
 __pycache__/
 *.pyc
