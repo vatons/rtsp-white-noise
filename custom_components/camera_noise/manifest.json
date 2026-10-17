@@ -1,0 +1,12 @@
+{
+  "domain": "camera_noise",
+  "name": "Camera Noise",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/vatons/ha-camera-noise",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/vatons/ha-camera-noise/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

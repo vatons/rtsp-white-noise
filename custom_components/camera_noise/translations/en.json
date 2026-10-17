@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a Tapo camera",
+        "description": "Plays white, pink or ocean noise through the camera's own speaker. Tapo cameras need your TP-Link account password, which is checked with the camera on your network and never sent anywhere else. Third-Party Compatibility must be on in the Tapo app, under Me > Tapo Lab.",
+        "data": {
+          "name": "Name",
+          "host": "Camera IP address",
+          "tapo_cloud_password": "TP-Link account password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Couldn't reach the camera. Check the IP address and that it's on this network.",
+      "not_tapo": "That address doesn't answer like a Tapo camera.",
+      "third_party": "The camera refused the password. Check it, and that Third-Party Compatibility is on in the Tapo app (Me > Tapo Lab).",
+      "invalid_auth": "The camera refused the password.",
+      "unknown": "Something unexpected went wrong. The log has the detail."
+    },
+    "abort": {
+      "already_configured": "This camera is already set up."
+    }
+  },
+  "entity": {
+    "switch": {
+      "noise": {
+        "name": "Noise"
+      }
+    }
+  }
+}
