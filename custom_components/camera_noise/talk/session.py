@@ -6,7 +6,8 @@ volume and sound changed live, and a dropout reconnected with backoff
 rather than ending the noise - a camera rebooting for a firmware update at
 3am should not leave the room suddenly quiet.
 
-Only a session that has played is reconnected. One that never got that far
+Only a session that has played is reconnected - which includes one resumed
+after a restart, since it was playing before. One that never got that far
 failed on something a person has to fix - a wrong password, the Tapo
 setting, a camera that is off - and retrying it all night fixes nothing,
 and on a Tapo counts towards a login lockout.
@@ -102,11 +103,23 @@ class NoiseSession:
                 self._noise.sound = value
 
     def play(self) -> None:
+        self._start(resuming=False)
+
+    def resume(self) -> None:
+        """Play again what was playing when Home Assistant stopped.
+
+        A continuation rather than a fresh start, so not getting through is
+        retried as a dropout would be: after a power cut the camera can take
+        longer to come back than Home Assistant does. A refusal still ends it.
+        """
+        self._start(resuming=True)
+
+    def _start(self, resuming: bool) -> None:
         with self._lock:
             if self._state is not State.OFF:
                 return
             self._generation += 1
-            self._ever_played = False
+            self._ever_played = resuming
             self._attempts = 0
             self._last_error = None
             self._open(self._generation)

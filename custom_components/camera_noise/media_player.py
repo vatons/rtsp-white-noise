@@ -75,8 +75,9 @@ class CameraNoisePlayer(MediaPlayerEntity, RestoreEntity):
         await super().async_added_to_hass()
         # The volume and sound chosen last time, not a default: a default
         # after a restart is how something too loud gets played into a room
-        # with a sleeping baby in it. Not whether it was playing - a restart
-        # should not start noise in a room by itself.
+        # with a sleeping baby in it. And whether it was playing: an update
+        # or a power cut in the night should not leave the room suddenly
+        # quiet. Noise that was off stays off.
         last = await self.async_get_last_state()
         if last is not None:
             volume = last.attributes.get("volume_level")
@@ -85,6 +86,9 @@ class CameraNoisePlayer(MediaPlayerEntity, RestoreEntity):
             sound = _SOUND_BY_LABEL.get(last.attributes.get("source"))
             if sound is not None:
                 self._session.sound = sound
+            # Buffering too: still noise somebody asked for, mid-reconnect.
+            if last.state in (MediaPlayerState.PLAYING, MediaPlayerState.BUFFERING):
+                self._session.resume()
         self.async_on_remove(self._camera.add_listener(self.async_write_ha_state))
 
     @property

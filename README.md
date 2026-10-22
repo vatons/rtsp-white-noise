@@ -71,8 +71,11 @@ Each camera becomes a device with two entities:
   before the noise starts. Pause stops.
 - **A Noise switch** - on and off, for automations and voice.
 
-Volume and sound are remembered across restarts. Whether it was playing is
-not: a restart never starts noise in a room on its own.
+Volume, sound and whether it was playing are remembered across restarts:
+noise that was playing when Home Assistant stopped starts again when it
+comes back, and noise that was off stays off. After a power cut the camera
+can take longer to come back than Home Assistant, so a camera that is not
+answering yet is retried, as below.
 
 If the camera drops out while playing - a reboot, a WiFi blip - it keeps
 trying to reconnect (after 1, 2, 5, 10, then every 30 seconds) until it is

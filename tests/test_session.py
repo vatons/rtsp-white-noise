@@ -119,3 +119,27 @@ def test_a_refused_credential_after_playing_is_not_retried():
     made[0].on_stopped(TalkbackError(Failure.REJECTED, "HTTP 401"))
     assert session.state is State.OFF
     assert len(made) == 1
+
+
+def test_resuming_after_a_restart_retries_a_camera_not_back_yet(monkeypatch):
+    # Home Assistant back from a power cut before the camera is.
+    monkeypatch.setattr(session_module, "RECONNECT_DELAYS", (0.05,))
+    session, made = make_session()
+    session.resume()
+    made[0].on_stopped(TalkbackError(Failure.UNREACHABLE, "timed out"))
+    assert session.state is State.RECONNECTING
+    deadline = time.monotonic() + 2
+    while len(made) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(made) == 2 and made[1].started
+    made[1].on_playing()
+    assert session.state is State.PLAYING
+
+
+def test_resuming_after_a_restart_does_not_retry_a_refusal():
+    session, made = make_session()
+    session.resume()
+    made[0].on_stopped(TalkbackError(Failure.REJECTED, "HTTP 401"))
+    assert session.state is State.OFF
+    assert session.last_error.failure is Failure.REJECTED
+    assert len(made) == 1

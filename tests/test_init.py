@@ -11,9 +11,9 @@ from unittest.mock import patch
 import pytest
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 from homeassistant.data_entry_flow import FlowResultType
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, mock_restore_cache
 
 from custom_components.camera_noise.const import CONF_KIND, CONF_STREAM_URL, CONF_TAPO_CLOUD_PASSWORD, DOMAIN
 from custom_components.camera_noise.talk import onvif_device
@@ -317,3 +317,21 @@ async def test_unloading_stops_the_noise(hass: HomeAssistant, fake_camera) -> No
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert fake_camera[0].stopped
+
+
+async def test_noise_playing_before_a_restart_plays_again(hass: HomeAssistant, fake_camera) -> None:
+    mock_restore_cache(hass, [State(PLAYER, "playing", {"volume_level": 0.25, "source": "Ocean waves"})])
+    await _set_up(hass)
+    assert hass.states.get(PLAYER).state == "buffering"
+    assert hass.states.get(SWITCH).state == "on"
+    noise = fake_camera[0].source.__self__
+    assert (noise.volume, noise.sound) == (0.25, "ocean")
+
+
+async def test_noise_off_before_a_restart_stays_off(hass: HomeAssistant, fake_camera) -> None:
+    mock_restore_cache(hass, [State(PLAYER, "idle", {"volume_level": 0.25, "source": "Ocean waves"})])
+    await _set_up(hass)
+    state = hass.states.get(PLAYER)
+    assert state.state == "idle"
+    assert (state.attributes["volume_level"], state.attributes["source"]) == (0.25, "Ocean waves")
+    assert fake_camera == []
