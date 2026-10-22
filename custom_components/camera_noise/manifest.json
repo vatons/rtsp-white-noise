@@ -1,12 +1,14 @@
 {
   "domain": "camera_noise",
   "name": "Camera Noise",
-  "codeowners": [],
+  "codeowners": [
+    "@vatons"
+  ],
   "config_flow": true,
-  "documentation": "https://github.com/vatons/ha-camera-noise",
+  "documentation": "https://github.com/vatons/rtsp-white-noise",
   "integration_type": "device",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/vatons/ha-camera-noise/issues",
+  "issue_tracker": "https://github.com/vatons/rtsp-white-noise/issues",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

@@ -47,7 +47,7 @@ class CameraNoiseSwitch(SwitchEntity):
         return self._session.state is not State.OFF
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        self._session.play()
+        self._camera.play()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        self._session.stop()
+        self._camera.stop()

@@ -24,6 +24,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util import dt as dt_util
 
 from . import CameraNoiseConfigEntry
 from .const import CONF_KIND, DOMAIN, SOUND_LABELS
@@ -87,8 +88,10 @@ class CameraNoisePlayer(MediaPlayerEntity, RestoreEntity):
             if sound is not None:
                 self._session.sound = sound
             # Buffering too: still noise somebody asked for, mid-reconnect.
+            # Until the sleep timer it had, if it had one.
             if last.state in (MediaPlayerState.PLAYING, MediaPlayerState.BUFFERING):
-                self._session.resume()
+                stop_at = last.attributes.get("stop_at")
+                self._camera.resume(dt_util.parse_datetime(stop_at) if isinstance(stop_at, str) else None)
         self.async_on_remove(self._camera.add_listener(self.async_write_ha_state))
 
     @property
@@ -109,20 +112,24 @@ class CameraNoisePlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         error = self._session.last_error
+        stop_at = self._camera.stop_at
         return {
             "connection": self._session.state.value,
             "last_error": error.failure.value if error else None,
             "last_error_detail": str(error) if error else None,
+            # When the sleep timer stops the noise; also what a restart
+            # resumes it until.
+            "stop_at": stop_at.isoformat() if stop_at else None,
         }
 
     async def async_media_play(self) -> None:
-        self._session.play()
+        self._camera.play()
 
     async def async_media_pause(self) -> None:
-        self._session.stop()
+        self._camera.stop()
 
     async def async_media_stop(self) -> None:
-        self._session.stop()
+        self._camera.stop()
 
     async def async_set_volume_level(self, volume: float) -> None:
         self._session.volume = volume

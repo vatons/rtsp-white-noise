@@ -42,6 +42,15 @@
           "username": "Username",
           "password": "Password"
         }
+      },
+      "reauth_confirm": {
+        "title": "The camera refused its login",
+        "description": "{name} ({host}) refused the login it has, so its noise stopped. Enter the password again, or leave it blank to try the saved one.\n\nA Tapo camera also refuses a correct password when Third-Party Compatibility is off in the Tapo app (Me > Tapo Lab) - a firmware update can switch it off.",
+        "data": {
+          "tapo_cloud_password": "TP-Link account password",
+          "username": "Username",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -57,10 +66,16 @@
     },
     "abort": {
       "already_configured": "This camera is already set up.",
-      "reconfigure_successful": "The camera's details have been updated."
+      "reconfigure_successful": "The camera's details have been updated.",
+      "reauth_successful": "The camera accepted the login."
     }
   },
   "entity": {
+    "number": {
+      "sleep_timer": {
+        "name": "Sleep timer"
+      }
+    },
     "switch": {
       "noise": {
         "name": "Noise"

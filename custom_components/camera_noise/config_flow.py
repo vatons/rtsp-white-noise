@@ -13,13 +13,15 @@ from the answer:
 
 Nothing is saved until the camera has said yes, and no step plays a sound.
 Reconfigure goes through the same checks for a camera already added - a
-changed password, or an IP the router moved.
+changed password, or an IP the router moved - and so does reauthentication,
+which Home Assistant offers when the camera starts refusing its login.
 """
 
 from __future__ import annotations
 
 import logging
 import urllib.parse
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -285,5 +287,65 @@ class CameraNoiseConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Optional(CONF_PASSWORD): _PASSWORD,
                 }
             ),
+            errors=errors,
+        )
+
+    # --- Reauthentication ----------------------------------------------------
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
+        """Started by the camera refusing its login, not by a person."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        entry = self._get_reauth_entry()
+        if entry.data[CONF_KIND] == KIND_TAPO:
+            return await self._reauth_tapo(entry, user_input)
+        return await self._reauth_onvif(entry, user_input)
+
+    async def _reauth_tapo(self, entry, user_input: dict[str, Any] | None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            # Blank tries the saved one again: the likelier fix is the Tapo
+            # setting, switched off by a firmware update, not the password.
+            password = user_input.get(CONF_TAPO_CLOUD_PASSWORD) or entry.data[CONF_TAPO_CLOUD_PASSWORD]
+            error = await self.hass.async_add_executor_job(
+                tapo.check_cloud_password, entry.data[CONF_HOST], password
+            )
+            if error is None:
+                return self.async_update_reload_and_abort(
+                    entry, data={**entry.data, CONF_TAPO_CLOUD_PASSWORD: password}
+                )
+            errors["base"] = _TAPO_ERRORS.get(error.failure, "unknown")
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Optional(CONF_TAPO_CLOUD_PASSWORD): _PASSWORD}),
+            description_placeholders={"name": entry.title, "host": entry.data[CONF_HOST]},
+            errors=errors,
+        )
+
+    async def _reauth_onvif(self, entry, user_input: dict[str, Any] | None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            username = user_input.get(CONF_USERNAME, "")
+            password = user_input.get(CONF_PASSWORD) or entry.data.get(CONF_PASSWORD, "")
+            error = await self.hass.async_add_executor_job(
+                onvif.probe, entry.data[CONF_STREAM_URL], username, password
+            )
+            if error is None:
+                return self.async_update_reload_and_abort(
+                    entry, data={**entry.data, CONF_USERNAME: username, CONF_PASSWORD: password}
+                )
+            errors["base"] = _ONVIF_ERRORS.get(error.failure, "unknown")
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, "")): str,
+                    vol.Optional(CONF_PASSWORD): _PASSWORD,
+                }
+            ),
+            description_placeholders={"name": entry.title, "host": entry.unique_id},
             errors=errors,
         )

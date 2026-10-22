@@ -64,23 +64,29 @@ Or copy `custom_components/camera_noise` into your Home Assistant
 
 ## What you get
 
-Each camera becomes a device with two entities:
+Each camera becomes a device with three entities:
 
 - **A media player** - play, stop, volume, and the sound as its source.
   It shows as idle rather than off while quiet, so the volume can be set
-  before the noise starts. Pause stops.
+  before the noise starts. Pause stops. Its `stop_at` attribute says when
+  the sleep timer will stop the noise.
 - **A Noise switch** - on and off, for automations and voice.
+- **A Sleep timer** - how many minutes the noise plays once it starts,
+  however it is started; 0 plays it until it is stopped. Changed while the
+  noise plays, it counts from then.
 
-Volume, sound and whether it was playing are remembered across restarts:
-noise that was playing when Home Assistant stopped starts again when it
-comes back, and noise that was off stays off. After a power cut the camera
-can take longer to come back than Home Assistant, so a camera that is not
-answering yet is retried, as below.
+Volume, sound, the sleep timer and whether it was playing are remembered
+across restarts: noise that was playing when Home Assistant stopped starts
+again when it comes back - until the time its sleep timer had, or not at
+all if that passed while Home Assistant was down - and noise that was off
+stays off. After a power cut the camera can take longer to come back than
+Home Assistant, so a camera that is not answering yet is retried, as below.
 
 If the camera drops out while playing - a reboot, a WiFi blip - it keeps
 trying to reconnect (after 1, 2, 5, 10, then every 30 seconds) until it is
 stopped. A refused password is not retried: Tapo locks out repeated failed
-logins.
+logins. Home Assistant asks for the login again instead - the camera shows
+**Reauthentication required** in Settings > Devices & services.
 
 ### A bedtime automation
 
@@ -99,19 +105,27 @@ automation:
       - action: media_player.volume_set
         target: { entity_id: media_player.nursery }
         data: { volume_level: 0.4 }
+      # Off again after an hour.
+      - action: number.set_value
+        target: { entity_id: number.nursery_sleep_timer }
+        data: { value: 60 }
       - action: switch.turn_on
         target: { entity_id: switch.nursery_noise }
-      # A sleep timer: off again after an hour.
-      - delay: "01:00:00"
-      - action: switch.turn_off
-        target: { entity_id: switch.nursery_noise }
 ```
+
+Use the sleep timer rather than a `delay` and a turn-off: a restart cancels
+an automation part-way through its delay, so the turn-off would never come
+and the noise, resumed after the restart, would play on.
 
 ## Limits
 
 - **One sender at a time.** A camera's speaker takes one talk session.
   While another app plays through it, this cannot, and the other way round.
 - **Local network only.** Home Assistant has to be able to reach the camera.
+
+For a bug report, **Download diagnostics** from the camera's menu in
+Settings > Devices & services: its settings, with the passwords removed,
+and what its session is doing.
 
 ## Development
 
@@ -144,3 +158,8 @@ docker run --rm -v "$PWD:/app" -w /app camera-noise-test python -m pytest
 
 The MPEG-TS tests check against bytes a real Tapo C120 accepted, and the
 ONVIF tests run a whole session against a fake camera on localhost.
+
+GitHub runs all of the tests on every push, along with Home Assistant's
+`hassfest` and HACS's own checks - see `.github/workflows/validate.yml`.
+Weekly too, so a Home Assistant release that breaks something shows up
+before anyone updates to it.

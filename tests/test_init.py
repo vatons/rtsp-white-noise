@@ -6,21 +6,30 @@ make no sound and need no network.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
 from homeassistant import config_entries
-from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PASSWORD, CONF_USERNAME, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, State
 from homeassistant.data_entry_flow import FlowResultType
-from pytest_homeassistant_custom_component.common import MockConfigEntry, mock_restore_cache
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+    mock_restore_cache,
+    mock_restore_cache_with_extra_data,
+)
 
 from custom_components.camera_noise.const import CONF_KIND, CONF_STREAM_URL, CONF_TAPO_CLOUD_PASSWORD, DOMAIN
+from custom_components.camera_noise.diagnostics import async_get_config_entry_diagnostics
 from custom_components.camera_noise.talk import onvif_device
 from custom_components.camera_noise.talk.errors import Failure, TalkbackError
 
 PLAYER = "media_player.nursery"
 SWITCH = "switch.nursery_noise"
+TIMER = "number.nursery_sleep_timer"
 FLOW = "custom_components.camera_noise.config_flow"
 SETUP = "custom_components.camera_noise.async_setup_entry"
 
@@ -319,6 +328,63 @@ async def test_unloading_stops_the_noise(hass: HomeAssistant, fake_camera) -> No
     assert fake_camera[0].stopped
 
 
+# --- The sleep timer ---------------------------------------------------------
+
+def _stop_at(hass: HomeAssistant):
+    value = hass.states.get(PLAYER).attributes["stop_at"]
+    return dt_util.parse_datetime(value) if value else None
+
+
+async def test_the_sleep_timer_stops_the_noise(hass: HomeAssistant, fake_camera) -> None:
+    await _set_up(hass)
+    await hass.services.async_call("number", "set_value", {"entity_id": TIMER, "value": 60}, blocking=True)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": SWITCH}, blocking=True)
+    fake_camera[0].on_playing()
+    await hass.async_block_till_done()
+    stop_at = _stop_at(hass)
+    assert timedelta(minutes=59) < stop_at - dt_util.utcnow() <= timedelta(minutes=60)
+
+    async_fire_time_changed(hass, stop_at + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert fake_camera[0].stopped
+    assert hass.states.get(PLAYER).state == "idle"
+    assert _stop_at(hass) is None
+
+
+async def test_the_sleep_timer_changed_while_playing_counts_from_then(hass: HomeAssistant, fake_camera) -> None:
+    await _set_up(hass)
+    await hass.services.async_call("media_player", "media_play", {"entity_id": PLAYER}, blocking=True)
+    await hass.async_block_till_done()
+    assert _stop_at(hass) is None
+
+    await hass.services.async_call("number", "set_value", {"entity_id": TIMER, "value": 30}, blocking=True)
+    await hass.async_block_till_done()
+    assert timedelta(minutes=29) < _stop_at(hass) - dt_util.utcnow() <= timedelta(minutes=30)
+
+    await hass.services.async_call("number", "set_value", {"entity_id": TIMER, "value": 0}, blocking=True)
+    await hass.async_block_till_done()
+    assert _stop_at(hass) is None
+    assert hass.states.get(PLAYER).state == "buffering"
+
+
+async def test_stopping_by_hand_cancels_the_sleep_timer(hass: HomeAssistant, fake_camera) -> None:
+    await _set_up(hass)
+    await hass.services.async_call("number", "set_value", {"entity_id": TIMER, "value": 60}, blocking=True)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": SWITCH}, blocking=True)
+    await hass.async_block_till_done()
+    first = _stop_at(hass)
+    await hass.services.async_call("switch", "turn_off", {"entity_id": SWITCH}, blocking=True)
+    # Started again with no timer: the first one must not stop it.
+    await hass.services.async_call("number", "set_value", {"entity_id": TIMER, "value": 0}, blocking=True)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": SWITCH}, blocking=True)
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, first + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert hass.states.get(SWITCH).state == "on"
+
+
+# --- Restarts ----------------------------------------------------------------
+
 async def test_noise_playing_before_a_restart_plays_again(hass: HomeAssistant, fake_camera) -> None:
     mock_restore_cache(hass, [State(PLAYER, "playing", {"volume_level": 0.25, "source": "Ocean waves"})])
     await _set_up(hass)
@@ -335,3 +401,129 @@ async def test_noise_off_before_a_restart_stays_off(hass: HomeAssistant, fake_ca
     assert state.state == "idle"
     assert (state.attributes["volume_level"], state.attributes["source"]) == (0.25, "Ocean waves")
     assert fake_camera == []
+
+
+async def test_a_restart_resumes_until_the_sleep_timer_it_had(hass: HomeAssistant, fake_camera) -> None:
+    stop_at = dt_util.utcnow() + timedelta(minutes=20)
+    mock_restore_cache(hass, [State(PLAYER, "playing", {"stop_at": stop_at.isoformat()})])
+    await _set_up(hass)
+    assert hass.states.get(PLAYER).state == "buffering"
+    assert _stop_at(hass) == stop_at
+
+    async_fire_time_changed(hass, stop_at + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert fake_camera[0].stopped
+    assert hass.states.get(PLAYER).state == "idle"
+
+
+async def test_a_sleep_timer_that_ran_out_during_the_restart_leaves_it_off(hass: HomeAssistant, fake_camera) -> None:
+    stop_at = dt_util.utcnow() - timedelta(minutes=5)
+    mock_restore_cache(hass, [State(PLAYER, "playing", {"stop_at": stop_at.isoformat()})])
+    await _set_up(hass)
+    assert hass.states.get(PLAYER).state == "idle"
+    assert fake_camera == []
+
+
+async def test_the_sleep_timer_setting_is_remembered(hass: HomeAssistant, fake_camera) -> None:
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(TIMER, "45"),
+                {
+                    "native_value": 45,
+                    "native_unit_of_measurement": "min",
+                    "native_min_value": 0,
+                    "native_max_value": 720,
+                    "native_step": 1,
+                },
+            )
+        ],
+    )
+    await _set_up(hass)
+    assert float(hass.states.get(TIMER).state) == 45
+
+
+async def test_home_assistant_stopping_ends_the_session_but_keeps_it_for_the_restart(
+    hass: HomeAssistant, fake_camera
+) -> None:
+    await _set_up(hass)
+    await hass.services.async_call("media_player", "media_play", {"entity_id": PLAYER}, blocking=True)
+    fake_camera[0].on_playing()
+    await hass.async_block_till_done()
+
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+    assert fake_camera[0].stopped
+    # What is saved for after the restart - so the noise comes back.
+    assert hass.states.get(PLAYER).state == "playing"
+    assert hass.states.get(SWITCH).state == "on"
+
+
+# --- A refused login ---------------------------------------------------------
+
+async def test_a_refused_tapo_login_asks_for_it_again(hass: HomeAssistant, fake_camera) -> None:
+    entry = await _set_up(hass)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": SWITCH}, blocking=True)
+    fake_camera[0].on_stopped(TalkbackError(Failure.NEEDS_THIRD_PARTY_ACCESS, "HTTP 401"))
+    await hass.async_block_till_done()
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert [flow["context"]["source"] for flow in flows] == [config_entries.SOURCE_REAUTH]
+
+    flow_id = flows[0]["flow_id"]
+    with patch(
+        f"{FLOW}.tapo.check_cloud_password",
+        return_value=TalkbackError(Failure.NEEDS_THIRD_PARTY_ACCESS, "HTTP 401"),
+    ) as check:
+        # Blank tries the saved password - for when it was the Tapo setting.
+        result = await hass.config_entries.flow.async_configure(flow_id, {})
+    assert result["errors"] == {"base": "third_party"}
+    check.assert_called_once_with("192.0.2.10", "secret")
+
+    with patch(f"{FLOW}.tapo.check_cloud_password", return_value=None) as check:
+        result = await hass.config_entries.flow.async_configure(flow_id, {CONF_TAPO_CLOUD_PASSWORD: "new"})
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    check.assert_called_once_with("192.0.2.10", "new")
+    assert entry.data[CONF_TAPO_CLOUD_PASSWORD] == "new"
+
+
+async def test_a_dropout_does_not_ask_for_the_login(hass: HomeAssistant, fake_camera) -> None:
+    await _set_up(hass)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": SWITCH}, blocking=True)
+    fake_camera[0].on_stopped(TalkbackError(Failure.UNREACHABLE, "timed out"))
+    await hass.async_block_till_done()
+    assert hass.config_entries.flow.async_progress_by_handler(DOMAIN) == []
+
+
+async def test_reauthenticating_any_camera_checks_the_new_login(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Front door",
+        unique_id="192.0.2.20",
+        data={CONF_KIND: "onvif", CONF_STREAM_URL: MAIN, CONF_USERNAME: "admin", CONF_PASSWORD: "old"},
+    )
+    entry.add_to_hass(hass)
+    result = await entry.start_reauth_flow(hass)
+    assert result["step_id"] == "reauth_confirm"
+    with (
+        patch(f"{FLOW}.onvif.probe", return_value=None) as probe,
+        patch(SETUP, return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_USERNAME: "admin", CONF_PASSWORD: "new"}
+        )
+    assert result["reason"] == "reauth_successful"
+    probe.assert_called_once_with(MAIN, "admin", "new")
+    assert entry.data[CONF_PASSWORD] == "new"
+
+
+# --- Diagnostics -------------------------------------------------------------
+
+async def test_diagnostics_leave_out_the_password(hass: HomeAssistant, fake_camera) -> None:
+    entry = await _set_up(hass)
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert diagnostics["entry"][CONF_TAPO_CLOUD_PASSWORD] == "**REDACTED**"
+    assert diagnostics["entry"][CONF_HOST] == "192.0.2.10"
+    assert diagnostics["session"]["state"] == "off"
