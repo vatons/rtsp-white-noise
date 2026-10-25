@@ -63,6 +63,10 @@ _TALK_REQUEST = b'{"params":{"talk":{"mode":"aec"},"method":"get"},"seq":3,"type
 
 _PACKET_MS = 20
 _SAMPLES = SAMPLE_RATE * _PACKET_MS // 1000
+# A packet's length in the 90 kHz clock its timestamps count in. Multiplied
+# out before dividing: 90 kHz is 11.25 ticks a sample, and rounded to 11 the
+# timestamps fell 22 ms a second behind the audio they carried.
+_TICKS_PER_PACKET = CLOCK_RATE * _SAMPLES // SAMPLE_RATE
 _CONNECT_TIMEOUT_S = 5
 _READ_TIMEOUT_S = 15
 _MAX_HEAD_BYTES = 8 * 1024
@@ -211,14 +215,13 @@ class TapoTalkback:
         ]
         _write_part(sock, headers, muxer.header(), trailing_crlf=False)
 
-        ticks_per_packet = (CLOCK_RATE // SAMPLE_RATE) * _SAMPLES
         pts = 0
         packets = 0
         started = time.monotonic()
         while not self._stop.is_set():
             payload = g711.encode_alaw(self._source(_SAMPLES))
             _write_part(sock, headers, muxer.packets(payload, pts), trailing_crlf=False)
-            pts += ticks_per_packet
+            pts += _TICKS_PER_PACKET
             packets += 1
             # Paced against the start, not the last packet, so the small
             # delays of each send do not add up into a slow drift.

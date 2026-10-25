@@ -16,8 +16,8 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "camera_noise"))
 
-from talk import g711  # noqa: E402
-from talk.mpegts import STREAM_TYPE_PCMA_TAPO, MpegTs  # noqa: E402
+from talk import g711, tapo  # noqa: E402
+from talk.mpegts import CLOCK_RATE, STREAM_TYPE_PCMA_TAPO, MpegTs  # noqa: E402
 from talk.noise import OCEAN, PINK, SOUNDS, WHITE, SoothingNoise  # noqa: E402
 
 EXPECTED_HEADER = (
@@ -57,6 +57,12 @@ def test_every_packet_is_188_bytes():
         out = muxer.packets(bytes(size), pts=0)
         assert len(out) % 188 == 0, size
         assert all(out[i] == 0x47 for i in range(0, len(out), 188)), size
+
+
+def test_a_second_of_tapo_packets_is_a_second_of_timestamps():
+    # Slower timestamps than audio and a camera's buffer fills until it
+    # drops sound to catch up - every 20-odd seconds, at 2% slow.
+    assert tapo._TICKS_PER_PACKET * (1000 // tapo._PACKET_MS) == CLOCK_RATE
 
 
 def test_continuity_runs_across_calls():
