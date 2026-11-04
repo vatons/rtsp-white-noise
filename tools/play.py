@@ -8,8 +8,8 @@ The protocols on their own, before Home Assistant is involved:
     python tools/play.py --sound pink --volume 0.2 --seconds 15
         Plays for 15 seconds, then stops.
 
-    python tools/play.py --seconds 120 --lead-ms 400
-        A Tapo sent further ahead of its speaker than the usual 200 ms -
+    python tools/play.py --seconds 120 --lead-ms 2000
+        A Tapo sent further ahead of its speaker than the usual 1000 ms -
         for finding what a camera will hold.
 
 Camera details come from a JSON file - camera.local.json by default, or
@@ -89,6 +89,7 @@ def main() -> int:
 
     def on_stopped(error) -> None:
         outcome["error"] = error
+        outcome["stopped_at"] = time.monotonic()
         done.set()
 
     talk = make(noise.read, on_playing, on_stopped)
@@ -112,7 +113,8 @@ def main() -> int:
 
     error = outcome.get("error")
     if error is not None:
-        print(f"Stopped with an error - {error}")
+        played = outcome["stopped_at"] - outcome["playing_at"] if "playing_at" in outcome else 0.0
+        print(f"Stopped with an error after {played:.1f}s of sound - {error}")
         return 1
     print("Stopped." if "playing_at" in outcome else "Never started playing.")
     return 0 if "playing_at" in outcome else 1

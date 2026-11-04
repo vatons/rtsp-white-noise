@@ -71,9 +71,11 @@ _TICKS_PER_PACKET = CLOCK_RATE * _SAMPLES // SAMPLE_RATE
 # that much in hand. Sent only as it is played, the slightest hold-up - Home
 # Assistant busy for a moment, Python collecting garbage, the WiFi holding a
 # packet back - is a gap you can hear. Too far ahead and the camera drops
-# sound to catch up: a C120 put up with about half a second of the old
-# timestamp drift before it did, so this stays well inside that.
-_LEAD_MS = 200
+# sound: tried on a Tapo, 1 and 2 seconds ahead played cleanly and 10 did
+# not. A second is half what is known to work, and still more than ten times
+# the longest WiFi delay measured to it - while keeping a volume change, made
+# on sound not yet played, from taking long to be heard.
+_LEAD_MS = 1000
 _CONNECT_TIMEOUT_S = 5
 _READ_TIMEOUT_S = 15
 _MAX_HEAD_BYTES = 8 * 1024
@@ -246,8 +248,10 @@ class TapoTalkback:
                 # A stop is still seen within a frame.
                 time.sleep(delay)
             elif delay < -lead_s and not behind:
-                # Held up for longer than the lead covers: this side's doing,
-                # not the network's, which the kernel buffers for seconds.
+                # Held up for longer than the lead covers. Usually this side -
+                # the kernel buffers a slow network for seconds - unless the
+                # camera has stopped taking sound altogether, which fills that
+                # buffer and blocks the send; a disconnect then follows.
                 # Once per hold-up, not for each packet that catches it up.
                 behind = True
                 _LOGGER.warning(
