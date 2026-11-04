@@ -10,6 +10,8 @@ Runs with pytest, or on its own: python tests/test_talk.py
 
 from __future__ import annotations
 
+import logging
+import math
 import pathlib
 import random
 import sys
@@ -63,6 +65,81 @@ def test_a_second_of_tapo_packets_is_a_second_of_timestamps():
     # Slower timestamps than audio and a camera's buffer fills until it
     # drops sound to catch up - every 20-odd seconds, at 2% slow.
     assert tapo._TICKS_PER_PACKET * (1000 // tapo._PACKET_MS) == CLOCK_RATE
+
+
+class _Clock:
+    """Stands in for the time module: sleeping moves it on, and so can a test."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+class _Socket:
+    def sendall(self, data):
+        pass
+
+
+class _Warnings(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.WARNING)
+        self.messages = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+
+def _send_to_tapo(packets, lead_ms, hold_up_at=None, hold_up_s=0.0):
+    """Runs a Tapo send loop on a fake clock: when each packet went, and the
+    warnings it gave. A hold-up stops the clock's world for a while, as Home
+    Assistant busy elsewhere would."""
+    clock = _Clock()
+    sent_at = []
+
+    def source(count):
+        if len(sent_at) == hold_up_at:
+            clock.now += hold_up_s
+        sent_at.append(clock.now)
+        if len(sent_at) == packets:
+            talk._stop.set()
+        return [0] * count
+
+    talk = tapo.TapoTalkback("192.0.2.10", "pw", source, lead_ms=lead_ms)
+    warnings = _Warnings()
+    real_time, tapo.time = tapo.time, clock
+    tapo._LOGGER.addHandler(warnings)
+    try:
+        talk._send(_Socket(), "session")
+    finally:
+        tapo.time = real_time
+        tapo._LOGGER.removeHandler(warnings)
+    return sent_at, warnings.messages
+
+
+def test_tapo_sound_goes_ahead_of_the_speaker():
+    sent_at, warnings = _send_to_tapo(50, lead_ms=200)
+    # Each packet's sound starts 20 ms after the last's; once the first ten
+    # have gone at once, every packet goes 200 ms before its sound is due.
+    ahead = [i * 0.020 - at for i, at in enumerate(sent_at)]
+    assert sent_at[:11] == [0.0] * 11
+    assert all(math.isclose(a, 0.2) for a in ahead[10:])
+    assert warnings == []
+
+
+def test_a_hold_up_the_lead_covers_says_nothing():
+    _, warnings = _send_to_tapo(60, lead_ms=200, hold_up_at=30, hold_up_s=0.15)
+    assert warnings == []
+
+
+def test_a_hold_up_longer_than_the_lead_warns_once():
+    _, warnings = _send_to_tapo(80, lead_ms=200, hold_up_at=30, hold_up_s=0.5)
+    assert len(warnings) == 1
+    assert "more than the 200 ms sent ahead" in warnings[0]
 
 
 def test_continuity_runs_across_calls():

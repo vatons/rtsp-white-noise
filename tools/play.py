@@ -8,6 +8,10 @@ The protocols on their own, before Home Assistant is involved:
     python tools/play.py --sound pink --volume 0.2 --seconds 15
         Plays for 15 seconds, then stops.
 
+    python tools/play.py --seconds 120 --lead-ms 400
+        A Tapo sent further ahead of its speaker than the usual 200 ms -
+        for finding what a camera will hold.
+
 Camera details come from a JSON file - camera.local.json by default, or
 --config another. See camera.local.example.json. A Tapo needs "host" and
 "tapo_cloud_password"; any other camera "stream_url", and "username" and
@@ -40,6 +44,10 @@ def main() -> int:
     parser.add_argument("--sound", choices=SOUNDS, default="white")
     parser.add_argument("--volume", type=float, default=0.2, help="0.0 to 1.0 (default 0.2)")
     parser.add_argument("--seconds", type=float, default=15.0)
+    parser.add_argument(
+        "--lead-ms", type=int, default=tapo._LEAD_MS,
+        help=f"Tapo only: how far ahead of the speaker to send (default {tapo._LEAD_MS})",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -52,7 +60,7 @@ def main() -> int:
         print(f"{host}: Tapo stream server {'found' if tapo.looks_like_tapo(host) else 'NOT found'}")
         check = lambda: tapo.check_cloud_password(host, camera["tapo_cloud_password"])  # noqa: E731
         make = lambda source, playing, stopped: tapo.TapoTalkback(  # noqa: E731
-            host, camera["tapo_cloud_password"], source, playing, stopped
+            host, camera["tapo_cloud_password"], source, playing, stopped, lead_ms=args.lead_ms
         )
     else:
         url = camera["stream_url"]

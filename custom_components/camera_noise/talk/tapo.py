@@ -67,6 +67,13 @@ _SAMPLES = SAMPLE_RATE * _PACKET_MS // 1000
 # out before dividing: 90 kHz is 11.25 ticks a sample, and rounded to 11 the
 # timestamps fell 22 ms a second behind the audio they carried.
 _TICKS_PER_PACKET = CLOCK_RATE * _SAMPLES // SAMPLE_RATE
+# How far ahead of the speaker the sound is sent, so the camera always has
+# that much in hand. Sent only as it is played, the slightest hold-up - Home
+# Assistant busy for a moment, Python collecting garbage, the WiFi holding a
+# packet back - is a gap you can hear. Too far ahead and the camera drops
+# sound to catch up: a C120 put up with about half a second of the old
+# timestamp drift before it did, so this stays well inside that.
+_LEAD_MS = 200
 _CONNECT_TIMEOUT_S = 5
 _READ_TIMEOUT_S = 15
 _MAX_HEAD_BYTES = 8 * 1024
@@ -92,10 +99,12 @@ class TapoTalkback:
         source: Callable[[int], list[int]],
         on_playing: Callable[[], None] | None = None,
         on_stopped: Callable[[TalkbackError | None], None] | None = None,
+        lead_ms: int = _LEAD_MS,
     ) -> None:
         self._host = host
         self._cloud_password = cloud_password
         self._source = source
+        self._lead_packets = lead_ms // _PACKET_MS
         self._on_playing = on_playing or (lambda: None)
         self._on_stopped = on_stopped or (lambda error: None)
         self._stop = threading.Event()
@@ -215,8 +224,11 @@ class TapoTalkback:
         ]
         _write_part(sock, headers, muxer.header(), trailing_crlf=False)
 
+        lead = self._lead_packets
+        lead_s = lead * _PACKET_MS / 1000
         pts = 0
         packets = 0
+        behind = False
         started = time.monotonic()
         while not self._stop.is_set():
             payload = g711.encode_alaw(self._source(_SAMPLES))
@@ -224,13 +236,25 @@ class TapoTalkback:
             pts += _TICKS_PER_PACKET
             packets += 1
             # Paced against the start, not the last packet, so the small
-            # delays of each send do not add up into a slow drift.
-            delay = started + packets * _PACKET_MS / 1000 - time.monotonic()
+            # delays of each send do not add up into a slow drift - and the
+            # lead ahead of it, which the first packets go out at once to build.
+            delay = started + (packets - lead) * _PACKET_MS / 1000 - time.monotonic()
             if delay > 0:
+                behind = False
                 # time.sleep, not the stop event's wait: on Windows the
                 # latter only times to ~15 ms, too coarse for 20 ms frames.
                 # A stop is still seen within a frame.
                 time.sleep(delay)
+            elif delay < -lead_s and not behind:
+                # Held up for longer than the lead covers: this side's doing,
+                # not the network's, which the kernel buffers for seconds.
+                # Once per hold-up, not for each packet that catches it up.
+                behind = True
+                _LOGGER.warning(
+                    "Sending to %s fell %.0f ms behind, more than the %.0f ms sent ahead - "
+                    "expect a gap in the sound",
+                    self._host, -delay * 1000, lead_s * 1000,
+                )
 
     def _request(self, authorization: str | None) -> bytes:
         lines = [
